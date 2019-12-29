@@ -15,7 +15,7 @@ public class Product {
     @NonNull
     private double price;
     @NonNull
-    private String category;
+    private CategoryCore category;
     @NonNull
     private String details;
 }

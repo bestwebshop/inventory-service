@@ -2,11 +2,14 @@ package tech.bestwebshop.api.productcomposite;
 
 import lombok.*;
 
+import java.io.Serializable;
+
 @Data
 @RequiredArgsConstructor
-public class ProductCore {
+@NoArgsConstructor
+public class ProductCore implements Serializable {
 
-    @Generated
+    @NonNull
     private int id;
     @NonNull
     private String name;

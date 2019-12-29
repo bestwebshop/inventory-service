@@ -15,7 +15,7 @@ import org.springframework.web.client.RestTemplate;
 @EnableCircuitBreaker
 @EnableHystrix
 @RibbonClient("inventory-service")
-public class ProductCompositeApplication {
+public class InventoryServiceApplication {
 
     @Bean
     @LoadBalanced
@@ -24,7 +24,7 @@ public class ProductCompositeApplication {
     }
 
     public static void main(String[] args) {
-        SpringApplication.run(ProductCompositeApplication.class, args);
+        SpringApplication.run(InventoryServiceApplication.class, args);
     }
 
 }
