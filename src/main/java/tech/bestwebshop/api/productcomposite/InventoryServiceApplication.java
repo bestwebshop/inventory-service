@@ -14,7 +14,7 @@ import org.springframework.web.client.RestTemplate;
 @EnableDiscoveryClient
 @EnableCircuitBreaker
 @EnableHystrix
-@RibbonClient("product-composite")
+@RibbonClient("inventory-service")
 public class ProductCompositeApplication {
 
     @Bean
