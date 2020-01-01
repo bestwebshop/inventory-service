@@ -9,9 +9,9 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>tech.bestwebshop.api</groupId>
-    <artifactId>product-composite</artifactId>
+    <artifactId>inventory-service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>product-composite</name>
+    <name>inventory-service</name>
     <description>Demo project for Spring Boot</description>
 
     <properties>
