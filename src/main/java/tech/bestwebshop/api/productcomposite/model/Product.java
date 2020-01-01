@@ -1,4 +1,4 @@
-package tech.bestwebshop.api.productcomposite;
+package tech.bestwebshop.api.productcomposite.model;
 
 import lombok.*;
 
@@ -15,7 +15,7 @@ public class Product {
     @NonNull
     private double price;
     @NonNull
-    private CategoryCore category;
+    private Category category;
     @NonNull
     private String details;
 }
