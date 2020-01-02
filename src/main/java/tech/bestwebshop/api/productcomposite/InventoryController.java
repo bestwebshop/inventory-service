@@ -2,7 +2,7 @@ package tech.bestwebshop.api.productcomposite;
 
 import com.netflix.hystrix.contrib.javanica.annotation.HystrixCommand;
 import com.netflix.hystrix.contrib.javanica.annotation.HystrixProperty;
-import com.netflix.ribbon.proxy.annotation.Http;
+import org.springframework.cloud.client.circuitbreaker.EnableCircuitBreaker;
 import org.springframework.cloud.netflix.hystrix.EnableHystrix;
 import org.springframework.http.*;
 import org.springframework.lang.Nullable;
@@ -21,6 +21,7 @@ import static java.util.Objects.requireNonNull;
 @Component
 @EnableHystrix
 @RestController
+@EnableCircuitBreaker
 @CrossOrigin(origins = "*", allowedHeaders = "*")
 public class InventoryController {
     private final Map<Integer, Product> productCache = new LinkedHashMap<>();
@@ -120,10 +121,13 @@ public class InventoryController {
         return ResponseEntity.ok(products);
     }
 
+    @HystrixCommand(fallbackMethod = "newProductCache", commandProperties = {
+            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
+    })
     @PostMapping("/products")
-    public ResponseEntity<Product> newProduct(@RequestBody @Valid ProductDTO productDTO){
+    public ResponseEntity<Product> newProduct(@RequestBody @Valid ProductDTO productDTO) {
         ResponseEntity<Category> categoryResponseEntity = getOrCreateCategory(productDTO.getCategory());
-        if(!wasCallSuccessful(categoryResponseEntity)){
+        if (!wasCallSuccessful(categoryResponseEntity)) {
             return ResponseEntity.status(categoryResponseEntity.getStatusCode()).build();
         }
         Category category = requireNonNull(categoryResponseEntity.getBody());
@@ -133,7 +137,7 @@ public class InventoryController {
 
         ResponseEntity<CoreProduct> coreProductResponseEntity = restTemplate.exchange(PRODUCT_SERVICE_URL, HttpMethod.POST,
                 buildHttpEntity(newCoreProduct), CoreProduct.class);
-        if(!wasCallSuccessful(coreProductResponseEntity)){
+        if (!wasCallSuccessful(coreProductResponseEntity)) {
             return ResponseEntity.status(coreProductResponseEntity.getStatusCode()).build();
         }
         CoreProduct coreProduct = requireNonNull(coreProductResponseEntity.getBody());
@@ -142,13 +146,21 @@ public class InventoryController {
         return ResponseEntity.status(HttpStatus.CREATED).body(product);
     }
 
+    @SuppressWarnings("unused")
+    public ResponseEntity<Product> newProductCache(@RequestBody @Valid ProductDTO productDTO) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
+    }
+
+    @HystrixCommand(fallbackMethod = "deleteProductCache", commandProperties = {
+            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
+    })
     @DeleteMapping("/products/{id}")
-    public ResponseEntity<Product> deleteProduct(@PathVariable(value = "id") Integer productId){
+    public ResponseEntity<Product> deleteProduct(@PathVariable(value = "id") Integer productId) {
         ResponseEntity<CoreProduct> coreProductResponseEntity;
         try {
             coreProductResponseEntity = restTemplate.exchange(PRODUCT_SERVICE_URL + "/" + productId,
                     HttpMethod.DELETE, buildHttpEntity(), CoreProduct.class);
-        } catch (HttpClientErrorException.NotFound ex){
+        } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
         }
         CoreProduct coreProduct = requireNonNull(coreProductResponseEntity.getBody());
@@ -157,13 +169,18 @@ public class InventoryController {
         try {
             categoryResponseEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + coreProduct.getCategoryID(),
                     HttpMethod.GET, buildHttpEntity(), Category.class);
-        } catch (HttpClientErrorException.NotFound ex){
+        } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
         }
         Category category = requireNonNull(categoryResponseEntity.getBody());
         Product product = new Product(coreProduct.getId(), coreProduct.getName(), coreProduct.getPrice(), category,
                 coreProduct.getDetails());
         return ResponseEntity.accepted().body(product);
+    }
+
+    @SuppressWarnings("unused")
+    public ResponseEntity<Product> deleteProductCache(@PathVariable(value = "id") Integer productId) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
     }
 
     private ResponseEntity<Category> getOrCreateCategory(String categoryName) {
@@ -180,16 +197,27 @@ public class InventoryController {
                 .orElseGet(() -> createCategory(new CategoryDTO(categoryName)));
     }
 
+    @HystrixCommand(fallbackMethod = "createCategoryCache", commandProperties = {
+            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
+    })
     @PostMapping("/categories")
-    private ResponseEntity<Category> createCategory(@RequestBody @Valid CategoryDTO categoryDTO){
+    public ResponseEntity<Category> createCategory(@RequestBody @Valid CategoryDTO categoryDTO) {
         try {
             return restTemplate.exchange(CATEGORY_SERVICE_URL, HttpMethod.POST, buildHttpEntity(categoryDTO),
                     Category.class);
-        } catch (HttpClientErrorException.BadRequest ex){
+        } catch (HttpClientErrorException.BadRequest ex) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
         }
     }
 
+    @SuppressWarnings("unused")
+    public ResponseEntity<Category> createCategoryCache(@RequestBody @Valid CategoryDTO categoryDTO) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
+    }
+
+    @HystrixCommand(fallbackMethod = "getCategoriesCache", commandProperties = {
+            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
+    })
     @GetMapping("/categories")
     public ResponseEntity<List<Category>> getCategories() {
         ResponseEntity<Category[]> categoriesEntity;
@@ -206,13 +234,16 @@ public class InventoryController {
         return ResponseEntity.ok(List.copyOf(categoryCache.values()));
     }
 
+    @HystrixCommand(fallbackMethod = "deleteCategoryCache", commandProperties = {
+            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
+    })
     @DeleteMapping("/categories/{id}")
-    public ResponseEntity<Category> deleteCategory(@PathVariable(value = "id") Long categoryId){
+    public ResponseEntity<Category> deleteCategory(@PathVariable(value = "id") Long categoryId) {
         ResponseEntity<Category> categoryResponseEntity;
         try {
-            categoryResponseEntity = restTemplate.exchange(CATEGORY_SERVICE_URL +"/" + categoryId,
+            categoryResponseEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + categoryId,
                     HttpMethod.DELETE, buildHttpEntity(), Category.class);
-        } catch (HttpClientErrorException.NotFound ex){
+        } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
         }
         Category category = requireNonNull(categoryResponseEntity.getBody());
@@ -230,12 +261,10 @@ public class InventoryController {
         return ResponseEntity.accepted().body(category);
     }
 
-   /* @PostMapping("/products")
-    public Product createProduct(@RequestBody @Valid Product product){
-        ProductCore productCore = new ProductCore(product.getName(), product.getPrice(), product.getCategory().get)
-
-        return product;
-    }*/
+    @SuppressWarnings("unused")
+    public ResponseEntity<Category> deleteCategoryCache(@PathVariable(value = "id") Long categoryId) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
+    }
 
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     private static <T> boolean wasCallSuccessful(ResponseEntity<T> responseEntity) {
@@ -255,7 +284,7 @@ public class InventoryController {
         return new HttpEntity<>(body, headers);
     }*/
 
-    private <T> HttpEntity<T> buildHttpEntity(@Nullable T body){
+    private <T> HttpEntity<T> buildHttpEntity(@Nullable T body) {
         HttpHeaders headers = new HttpHeaders();
         System.out.println("HTTP body should be " + body);
         return new HttpEntity<>(body, headers);
