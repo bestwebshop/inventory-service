@@ -39,6 +39,7 @@ public class InventoryController {
     })
     @GetMapping("/products/{id}")
     public ResponseEntity<Product> getProduct(@PathVariable(value = "id") Long productId) {
+        System.out.println("[InventoryService#getProduct] Get Product with ID " + productId);
         ResponseEntity<CoreProduct> coreProductEntity;
         try {
             coreProductEntity = restTemplate.exchange(PRODUCT_SERVICE_URL + "/" + productId,
@@ -47,6 +48,7 @@ public class InventoryController {
             return ResponseEntity.notFound().build();
         }
         CoreProduct tmpCoreProduct = requireNonNull(coreProductEntity.getBody());
+        System.out.println("[InventoryService#getProduct] Got Core Product " + tmpCoreProduct);
 
         ResponseEntity<Category> coreCategoryEntity;
         try {
@@ -57,20 +59,23 @@ public class InventoryController {
         }
 
         Category tmpCategory = requireNonNull(coreCategoryEntity.getBody());
-        System.out.println("Found category: " + tmpCategory);
+        System.out.println("[InventoryService#getProduct] Got Category " + tmpCategory);
 
         Product tmpProduct = new Product(tmpCoreProduct.getId(), tmpCoreProduct.getName(), tmpCoreProduct.getPrice(),
                 tmpCategory, tmpCoreProduct.getDetails());
         productCache.putIfAbsent(tmpProduct.getId(), tmpProduct);
+        System.out.println("[InventoryService#getProduct] Return Product " + tmpProduct);
         return ResponseEntity.ok(tmpProduct);
     }
 
     @SuppressWarnings("unused")
     public ResponseEntity<Product> getProductCache(Long productId) {
+        System.out.println("[InventoryService#getProductCache] Get product with ID " + productId);
         Product product = productCache.get(productId);
         if (product == null) {
             return ResponseEntity.notFound().build();
         }
+        System.out.println("[InventoryService#getProductCache] Return product " + product);
         return ResponseEntity.ok(product);
     }
 
@@ -81,6 +86,7 @@ public class InventoryController {
     public ResponseEntity<List<Product>> getProducts(@RequestParam(defaultValue = "") String text,
                                                      @RequestParam(defaultValue = MIN_PRICE) Double minPrice,
                                                      @RequestParam(defaultValue = MAX_PRICE) Double maxPrice) {
+        System.out.println("[InventoryService#getProducts] Get products");
         ResponseEntity<CoreProduct[]> coreProductsEntity;
 
         coreProductsEntity = restTemplate.exchange(PRODUCT_SERVICE_URL, HttpMethod.GET, buildHttpEntity(),
@@ -91,6 +97,8 @@ public class InventoryController {
                         && product.getPrice() <= maxPrice
                         && product.getPrice() >= minPrice)
                 .collect(Collectors.toList());
+
+        System.out.println("[InventoryService#getProducts] Found " + coreProducts.size() + " core products.");
 
         ResponseEntity<List<Category>> coreCategoriesEntity = getCategories();
         List<Category> categories = requireNonNull(coreCategoriesEntity.getBody());
@@ -107,17 +115,20 @@ public class InventoryController {
 
         productCache.clear();
         products.forEach(product -> productCache.put(product.getId(), product));
+        System.out.println("[InventoryService#getProducts] Return " + products.size() + " products.");
         return ResponseEntity.ok(products);
     }
 
     @SuppressWarnings("unused")
     public ResponseEntity<List<Product>> getProductsCache(String text, Double minPrice, Double maxPrice) {
+        System.out.println("[InventoryService#getProductsCache] Get cached products.");
         List<Product> products = productCache.values()
                 .stream()
                 .filter(product -> (product.getName().contains(text) || product.getDetails().contains(text))
                         && product.getPrice() <= maxPrice
                         && product.getPrice() >= minPrice)
                 .collect(Collectors.toList());
+        System.out.println("[InventoryService#getProducts] Return " + products.size() + " products.");
         return ResponseEntity.ok(products);
     }
 
@@ -220,10 +231,12 @@ public class InventoryController {
     })
     @GetMapping("/categories")
     public ResponseEntity<List<Category>> getCategories() {
+        System.out.println("[InventoryService#getCategories] Get categories.");
         ResponseEntity<Category[]> categoriesEntity;
         categoriesEntity = restTemplate.exchange(CATEGORY_SERVICE_URL, HttpMethod.GET, buildHttpEntity(),
                 Category[].class);
         List<Category> categories = List.of(requireNonNull(categoriesEntity.getBody()));
+        System.out.println("[InventoryService#getCategories] Found " + categories.size() + " categories.");
         categoryCache.clear();
         categories.forEach(category -> categoryCache.put(category.getId(), category));
         return ResponseEntity.ok(categories);
@@ -231,6 +244,7 @@ public class InventoryController {
 
     @SuppressWarnings("unused")
     public ResponseEntity<List<Category>> getCategoriesCache() {
+        System.out.println("[InventoryService#getCategoriesCache] Get cached categories.");
         return ResponseEntity.ok(List.copyOf(categoryCache.values()));
     }
 
