@@ -80,7 +80,8 @@ public class InventoryController {
     }
 
     @HystrixCommand(fallbackMethod = "getProductsCache", commandProperties = {
-            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
+            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2"),
+            @HystrixProperty(name = "execution.isolation.thread.timeoutInMilliseconds", value = "3000")
     })
     @GetMapping("/products")
     public ResponseEntity<List<Product>> getProducts(@RequestParam(defaultValue = "") String text,
