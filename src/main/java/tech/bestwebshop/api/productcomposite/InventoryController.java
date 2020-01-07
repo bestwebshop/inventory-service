@@ -27,8 +27,8 @@ public class InventoryController {
     private final Map<Integer, Product> productCache = new LinkedHashMap<>();
     private final Map<Integer, Category> categoryCache = new LinkedHashMap<>();
 
-    private static final String PRODUCT_SERVICE_URL = "http://product-service:8080/products";
-    private static final String CATEGORY_SERVICE_URL = "http://category-service:8080/categories";
+    private static final String PRODUCT_SERVICE_URL = "http://product-service/products";
+    private static final String CATEGORY_SERVICE_URL = "http://category-service/categories";
     private static final String MAX_PRICE = "1e10";
     private static final String MIN_PRICE = "-1e10";
 
@@ -45,6 +45,9 @@ public class InventoryController {
             coreProductEntity = restTemplate.exchange(PRODUCT_SERVICE_URL + "/" + productId,
                     HttpMethod.GET, buildHttpEntity(), CoreProduct.class);
         } catch (HttpClientErrorException.NotFound ex) {
+            return ResponseEntity.notFound().build();
+        } catch (Exception ex){
+            System.out.println("[InventoryService#getProduct] Exception: " + ex.getMessage() + "\n" + ex.getStackTrace());
             return ResponseEntity.notFound().build();
         }
         CoreProduct tmpCoreProduct = requireNonNull(coreProductEntity.getBody());
@@ -90,8 +93,13 @@ public class InventoryController {
         System.out.println("[InventoryService#getProducts] Get products");
         ResponseEntity<CoreProduct[]> coreProductsEntity;
 
-        coreProductsEntity = restTemplate.exchange(PRODUCT_SERVICE_URL, HttpMethod.GET, buildHttpEntity(),
-                CoreProduct[].class);
+        try {
+            coreProductsEntity = restTemplate.exchange(PRODUCT_SERVICE_URL, HttpMethod.GET, buildHttpEntity(),
+                    CoreProduct[].class);
+        } catch (Exception ex){
+            System.out.println("[InventoryService#getProduct] Exception: " + ex.getMessage() + "\n" + ex.getStackTrace());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
 
         List<CoreProduct> coreProducts = Arrays.stream(requireNonNull(coreProductsEntity.getBody()))
                 .filter(product -> (product.getName().contains(text) || product.getDetails().contains(text))
