@@ -50,7 +50,7 @@ public class InventoryController {
                     HttpMethod.GET, buildHttpEntity(), CoreProduct.class);
         } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
-        } catch (Exception ex){
+        } catch (Exception ex) {
             System.out.println("[InventoryService#getProduct] Exception: " + ex.getMessage() + "\n" + ex.getStackTrace());
             return ResponseEntity.notFound().build();
         }
@@ -88,7 +88,6 @@ public class InventoryController {
 
     @HystrixCommand(fallbackMethod = "getProductsCache", commandProperties = {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2"),
-            @HystrixProperty(name = "execution.isolation.thread.timeoutInMilliseconds", value = "3000")
     })
     @GetMapping("/products")
     public ResponseEntity<List<Product>> getProducts(@RequestParam(defaultValue = "") String text,
@@ -100,7 +99,7 @@ public class InventoryController {
         try {
             coreProductsEntity = restTemplate.exchange(PRODUCT_SERVICE_URL, HttpMethod.GET, buildHttpEntity(),
                     CoreProduct[].class);
-        } catch (Exception ex){
+        } catch (Exception ex) {
             System.out.println("[InventoryService#getProduct] Exception: " + ex.getMessage() + "\n" + ex.getStackTrace());
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
@@ -172,6 +171,45 @@ public class InventoryController {
 
     @SuppressWarnings("unused")
     public ResponseEntity<Product> newProductCache(@RequestBody @Valid ProductDTO productDTO) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
+    }
+
+    @HystrixCommand(fallbackMethod = "updateProductCache", commandProperties = {
+            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
+    })
+    @PutMapping("/products/{id}")
+    public ResponseEntity<Product> updateProduct(@PathVariable(value = "id") Integer productId,
+                                                 @RequestBody @Valid Product productToUpdate) {
+        CoreProduct coreProductToUpdate = new CoreProduct(productToUpdate.getId(), productToUpdate.getName(),
+                productToUpdate.getPrice(), productToUpdate.getCategory().getId(), productToUpdate.getDetails());
+        ResponseEntity<CoreProduct> coreProductResponseEntity;
+        try {
+            coreProductResponseEntity = restTemplate.exchange(PRODUCT_SERVICE_URL + "/" + productId, HttpMethod.PUT,
+                    buildHttpEntity(coreProductToUpdate), CoreProduct.class);
+        } catch (HttpClientErrorException.NotFound ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+        CoreProduct coreProduct = requireNonNull(coreProductResponseEntity.getBody());
+
+        ResponseEntity<Category> coreCategoryEntity;
+        try {
+            coreCategoryEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + coreProduct.getCategoryID(),
+                    HttpMethod.GET, buildHttpEntity(), Category.class);
+        } catch (HttpClientErrorException.NotFound ex) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Category tmpCategory = requireNonNull(coreCategoryEntity.getBody());
+
+        Product tmpProduct = new Product(coreProduct.getId(), coreProduct.getName(), coreProduct.getPrice(),
+                tmpCategory, coreProduct.getDetails());
+        productCache.put(tmpProduct.getId(), tmpProduct);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(tmpProduct);
+    }
+
+    @SuppressWarnings("unused")
+    public ResponseEntity<Product> updateProductCache(@PathVariable(value = "id") Integer productId,
+                                                      @RequestBody @Valid Product productToUpdate){
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
     }
 
@@ -259,6 +297,53 @@ public class InventoryController {
     public ResponseEntity<List<Category>> getCategoriesCache() {
         System.out.println("[InventoryService#getCategoriesCache] Get cached categories.");
         return ResponseEntity.ok(List.copyOf(categoryCache.values()));
+    }
+
+    @HystrixCommand(fallbackMethod = "getCategoryCache", commandProperties = {
+            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
+    })
+    @GetMapping("categories/{id}")
+    public ResponseEntity<Category> getCategory(@PathVariable(value = "id") Long categoryId){
+        ResponseEntity<Category> categoryEntity;
+        try {
+            categoryEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + categoryId,
+                    HttpMethod.GET, buildHttpEntity(), Category.class);
+        } catch (HttpClientErrorException.NotFound ex) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Category category = requireNonNull(categoryEntity.getBody());
+        categoryCache.putIfAbsent(category.getId(), category);
+        return ResponseEntity.ok(category);
+    }
+
+    @SuppressWarnings("unused")
+    public ResponseEntity<Category> getCategoryCache(@PathVariable(value = "id") Long categoryId){
+        Category category = categoryCache.get(categoryId);
+        if (category == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(category);
+    }
+
+    @HystrixCommand(fallbackMethod = "updateCategoryCache", commandProperties = {
+            @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
+    })
+    @PutMapping("/categories/{id}")
+    public ResponseEntity<Category> updateCategory(@PathVariable(value = "id") Long categoryId,
+                                                   @RequestBody @Valid Category categoryToUpdate) {
+        ResponseEntity<Category> categoryResponseEntity;
+        categoryResponseEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + categoryId,
+                HttpMethod.PUT, buildHttpEntity(categoryToUpdate), Category.class);
+        Category category = requireNonNull(categoryResponseEntity.getBody());
+        categoryCache.put(category.getId(), category);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(category);
+    }
+
+    @SuppressWarnings("unused")
+    public ResponseEntity<Category> updateCategoryCache(@PathVariable(value = "id") Long categoryId,
+                                                        @RequestBody @Valid Category categoryToUpdate) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
     }
 
     @HystrixCommand(fallbackMethod = "deleteCategoryCache", commandProperties = {
