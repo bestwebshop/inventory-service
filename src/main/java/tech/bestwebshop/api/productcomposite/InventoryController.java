@@ -32,7 +32,11 @@ public class InventoryController {
     private static final String MAX_PRICE = "1e10";
     private static final String MIN_PRICE = "-1e10";
 
-    private static final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
+
+    public InventoryController(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     @HystrixCommand(fallbackMethod = "getProductCache", commandProperties = {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
