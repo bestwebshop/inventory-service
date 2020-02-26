@@ -30,4 +30,4 @@ security:
       scope: all.read all.write
     resource:
       jwk:
-        key-set-uri=http://authorization-service:8080/oauth2/keys
+        key-set-uri: http://authorization-service:8080/oauth2/keys
