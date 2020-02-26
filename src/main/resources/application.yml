@@ -18,3 +18,16 @@ management:
     web:
       exposure:
         include: hystrix.stream
+
+security:
+  oauth2:
+    client:
+      client-id: webshop-webclient
+      client-secret: supersecretpassword
+      access-token-uri: http://authorization-service:8080/oauth/token
+      grant-type: authorization_code
+      user-authorization-uri: http://authorization-service:8080/oauth/authorize
+      scope: all.read all.write
+    resource:
+      jwk:
+        key-set-uri=http://authorization-service:8080/oauth2/keys

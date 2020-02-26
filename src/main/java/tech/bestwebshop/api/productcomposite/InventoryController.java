@@ -6,14 +6,19 @@ import org.springframework.cloud.client.circuitbreaker.EnableCircuitBreaker;
 import org.springframework.cloud.netflix.hystrix.EnableHystrix;
 import org.springframework.http.*;
 import org.springframework.lang.Nullable;
+import org.springframework.security.oauth2.common.exceptions.OAuth2Exception;
+import org.springframework.security.oauth2.provider.OAuth2Authentication;
+import org.springframework.security.oauth2.provider.authentication.OAuth2AuthenticationDetails;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import tech.bestwebshop.api.productcomposite.model.*;
 
+import javax.annotation.security.RolesAllowed;
 import javax.validation.Valid;
 import java.util.*;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
@@ -24,6 +29,9 @@ import static java.util.Objects.requireNonNull;
 @EnableCircuitBreaker
 @CrossOrigin(origins = "*", allowedHeaders = "*")
 public class InventoryController {
+
+    private static final Logger LOGGER = Logger.getLogger(InventoryController.class.getSimpleName());
+
     private final Map<Integer, Product> productCache = new LinkedHashMap<>();
     private final Map<Integer, Category> categoryCache = new LinkedHashMap<>();
 
@@ -42,47 +50,58 @@ public class InventoryController {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
     })
     @GetMapping("/products/{id}")
-    public ResponseEntity<Product> getProduct(@PathVariable(value = "id") Long productId) {
-        System.out.println("[InventoryService#getProduct] Get Product with ID " + productId);
+    @RolesAllowed({"USER"})
+    public ResponseEntity<Product> getProduct(@PathVariable(value = "id") Long productId, OAuth2Authentication auth) {
+        LOGGER.info("Get Product with ID " + productId);
         ResponseEntity<CoreProduct> coreProductEntity;
         try {
             coreProductEntity = restTemplate.exchange(PRODUCT_SERVICE_URL + "/" + productId,
-                    HttpMethod.GET, buildHttpEntity(), CoreProduct.class);
+                    HttpMethod.GET, buildHttpEntity(auth), CoreProduct.class);
         } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
+        } catch (OAuth2Exception ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         } catch (Exception ex) {
-            System.out.println("[InventoryService#getProduct] Exception: " + ex.getMessage() + "\n" + ex.getStackTrace());
+            LOGGER.warning("[InventoryService#getProduct] Exception: " + ex.getMessage() + "\n" + ex.getStackTrace());
             return ResponseEntity.notFound().build();
         }
         CoreProduct tmpCoreProduct = requireNonNull(coreProductEntity.getBody());
         System.out.println("[InventoryService#getProduct] Got Core Product " + tmpCoreProduct);
 
-        ResponseEntity<Category> coreCategoryEntity;
-        try {
+        ResponseEntity<Category> coreCategoryEntity = getCategory(tmpCoreProduct.getCategoryID(), auth);
+        HttpStatus categoryStatus = coreCategoryEntity.getStatusCode();
+        if(!wasCallSuccessful(coreCategoryEntity) && categoryStatus != HttpStatus.NOT_FOUND){
+            if(categoryStatus == HttpStatus.FORBIDDEN){
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            } else {
+                throw new RuntimeException();
+            }
+        }
+        /*try {
             coreCategoryEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + tmpCoreProduct.getCategoryID(),
-                    HttpMethod.GET, buildHttpEntity(), Category.class);
+                    HttpMethod.GET, buildHttpEntity(auth), Category.class);
         } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
-        }
+        }*/
 
         Category tmpCategory = requireNonNull(coreCategoryEntity.getBody());
-        System.out.println("[InventoryService#getProduct] Got Category " + tmpCategory);
+        LOGGER.info("[InventoryService#getProduct] Got Category " + tmpCategory);
 
         Product tmpProduct = new Product(tmpCoreProduct.getId(), tmpCoreProduct.getName(), tmpCoreProduct.getPrice(),
                 tmpCategory, tmpCoreProduct.getDetails());
         productCache.putIfAbsent(tmpProduct.getId(), tmpProduct);
-        System.out.println("[InventoryService#getProduct] Return Product " + tmpProduct);
+        LOGGER.info("[InventoryService#getProduct] Return Product " + tmpProduct);
         return ResponseEntity.ok(tmpProduct);
     }
 
     @SuppressWarnings("unused")
-    public ResponseEntity<Product> getProductCache(Long productId) {
-        System.out.println("[InventoryService#getProductCache] Get product with ID " + productId);
+    public ResponseEntity<Product> getProductCache(Long productId, OAuth2Authentication auth) {
+        LOGGER.info("[InventoryService#getProductCache] Get product with ID " + productId);
         Product product = productCache.get(productId);
         if (product == null) {
             return ResponseEntity.notFound().build();
         }
-        System.out.println("[InventoryService#getProductCache] Return product " + product);
+        LOGGER.info("[InventoryService#getProductCache] Return product " + product);
         return ResponseEntity.ok(product);
     }
 
@@ -90,17 +109,21 @@ public class InventoryController {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2"),
     })
     @GetMapping("/products")
+    @RolesAllowed({"USER"})
     public ResponseEntity<List<Product>> getProducts(@RequestParam(defaultValue = "") String text,
                                                      @RequestParam(defaultValue = MIN_PRICE) Double minPrice,
-                                                     @RequestParam(defaultValue = MAX_PRICE) Double maxPrice) {
-        System.out.println("[InventoryService#getProducts] Get products");
+                                                     @RequestParam(defaultValue = MAX_PRICE) Double maxPrice,
+                                                     OAuth2Authentication auth) {
+        LOGGER.info("Get products");
         ResponseEntity<CoreProduct[]> coreProductsEntity;
 
         try {
-            coreProductsEntity = restTemplate.exchange(PRODUCT_SERVICE_URL, HttpMethod.GET, buildHttpEntity(),
+            coreProductsEntity = restTemplate.exchange(PRODUCT_SERVICE_URL, HttpMethod.GET, buildHttpEntity(auth),
                     CoreProduct[].class);
+        } catch (OAuth2Exception e){
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         } catch (Exception ex) {
-            System.out.println("[InventoryService#getProduct] Exception: " + ex.getMessage() + "\n" + ex.getStackTrace());
+            LOGGER.warning("[InventoryService#getProduct] Exception: " + ex.getMessage() + "\n" + ex.getStackTrace());
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
@@ -110,9 +133,9 @@ public class InventoryController {
                         && product.getPrice() >= minPrice)
                 .collect(Collectors.toList());
 
-        System.out.println("[InventoryService#getProducts] Found " + coreProducts.size() + " core products.");
+        LOGGER.info("[InventoryService#getProducts] Found " + coreProducts.size() + " core products.");
 
-        ResponseEntity<List<Category>> coreCategoriesEntity = getCategories();
+        ResponseEntity<List<Category>> coreCategoriesEntity = getCategories(auth);
         List<Category> categories = requireNonNull(coreCategoriesEntity.getBody());
         Map<Integer, Category> categoryCoreMap = categories.stream()
                 .collect(Collectors.toMap(Category::getId, category -> category, (a, b) -> b));
@@ -127,20 +150,20 @@ public class InventoryController {
 
         productCache.clear();
         products.forEach(product -> productCache.put(product.getId(), product));
-        System.out.println("[InventoryService#getProducts] Return " + products.size() + " products.");
+        LOGGER.info("[InventoryService#getProducts] Return " + products.size() + " products.");
         return ResponseEntity.ok(products);
     }
 
     @SuppressWarnings("unused")
-    public ResponseEntity<List<Product>> getProductsCache(String text, Double minPrice, Double maxPrice) {
-        System.out.println("[InventoryService#getProductsCache] Get cached products.");
+    public ResponseEntity<List<Product>> getProductsCache(String text, Double minPrice, Double maxPrice, OAuth2Authentication auth) {
+        LOGGER.info("[InventoryService#getProductsCache] Get cached products.");
         List<Product> products = productCache.values()
                 .stream()
                 .filter(product -> (product.getName().contains(text) || product.getDetails().contains(text))
                         && product.getPrice() <= maxPrice
                         && product.getPrice() >= minPrice)
                 .collect(Collectors.toList());
-        System.out.println("[InventoryService#getProducts] Return " + products.size() + " products.");
+        LOGGER.info("[InventoryService#getProducts] Return " + products.size() + " products.");
         return ResponseEntity.ok(products);
     }
 
@@ -148,8 +171,9 @@ public class InventoryController {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
     })
     @PostMapping("/products")
-    public ResponseEntity<Product> newProduct(@RequestBody @Valid ProductDTO productDTO) {
-        ResponseEntity<Category> categoryResponseEntity = getOrCreateCategory(productDTO.getCategory());
+    @RolesAllowed({"ADMIN"})
+    public ResponseEntity<Product> newProduct(@RequestBody @Valid ProductDTO productDTO, OAuth2Authentication auth) {
+        ResponseEntity<Category> categoryResponseEntity = getOrCreateCategory(productDTO.getCategory(), auth);
         if (!wasCallSuccessful(categoryResponseEntity)) {
             return ResponseEntity.status(categoryResponseEntity.getStatusCode()).build();
         }
@@ -159,7 +183,7 @@ public class InventoryController {
                 productDTO.getDetails());
 
         ResponseEntity<CoreProduct> coreProductResponseEntity = restTemplate.exchange(PRODUCT_SERVICE_URL, HttpMethod.POST,
-                buildHttpEntity(newCoreProduct), CoreProduct.class);
+                buildHttpEntity(auth, newCoreProduct), CoreProduct.class);
         if (!wasCallSuccessful(coreProductResponseEntity)) {
             return ResponseEntity.status(coreProductResponseEntity.getStatusCode()).build();
         }
@@ -170,7 +194,7 @@ public class InventoryController {
     }
 
     @SuppressWarnings("unused")
-    public ResponseEntity<Product> newProductCache(@RequestBody @Valid ProductDTO productDTO) {
+    public ResponseEntity<Product> newProductCache(@RequestBody @Valid ProductDTO productDTO, OAuth2Authentication auth) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
     }
 
@@ -178,25 +202,31 @@ public class InventoryController {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
     })
     @PutMapping("/products/{id}")
+    @RolesAllowed({"ADMIN"})
     public ResponseEntity<Product> updateProduct(@PathVariable(value = "id") Integer productId,
-                                                 @RequestBody @Valid Product productToUpdate) {
+                                                 @RequestBody @Valid Product productToUpdate,
+                                                 OAuth2Authentication auth) {
         CoreProduct coreProductToUpdate = new CoreProduct(productToUpdate.getId(), productToUpdate.getName(),
                 productToUpdate.getPrice(), productToUpdate.getCategory().getId(), productToUpdate.getDetails());
         ResponseEntity<CoreProduct> coreProductResponseEntity;
         try {
             coreProductResponseEntity = restTemplate.exchange(PRODUCT_SERVICE_URL + "/" + productId, HttpMethod.PUT,
-                    buildHttpEntity(coreProductToUpdate), CoreProduct.class);
+                    buildHttpEntity(auth, coreProductToUpdate), CoreProduct.class);
         } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        } catch (OAuth2Exception ex){
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         CoreProduct coreProduct = requireNonNull(coreProductResponseEntity.getBody());
 
         ResponseEntity<Category> coreCategoryEntity;
         try {
             coreCategoryEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + coreProduct.getCategoryID(),
-                    HttpMethod.GET, buildHttpEntity(), Category.class);
+                    HttpMethod.GET, buildHttpEntity(auth), Category.class);
         } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
+        } catch (OAuth2Exception ex){
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
         Category tmpCategory = requireNonNull(coreCategoryEntity.getBody());
@@ -209,7 +239,8 @@ public class InventoryController {
 
     @SuppressWarnings("unused")
     public ResponseEntity<Product> updateProductCache(@PathVariable(value = "id") Integer productId,
-                                                      @RequestBody @Valid Product productToUpdate){
+                                                      @RequestBody @Valid Product productToUpdate,
+                                                      OAuth2Authentication auth){
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
     }
 
@@ -217,22 +248,33 @@ public class InventoryController {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
     })
     @DeleteMapping("/products/{id}")
-    public ResponseEntity<Product> deleteProduct(@PathVariable(value = "id") Integer productId) {
+    @RolesAllowed({"ADMIN"})
+    public ResponseEntity<Product> deleteProduct(@PathVariable(value = "id") Integer productId, OAuth2Authentication auth) {
         ResponseEntity<CoreProduct> coreProductResponseEntity;
         try {
             coreProductResponseEntity = restTemplate.exchange(PRODUCT_SERVICE_URL + "/" + productId,
-                    HttpMethod.DELETE, buildHttpEntity(), CoreProduct.class);
+                    HttpMethod.DELETE, buildHttpEntity(auth), CoreProduct.class);
         } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
+        } catch (OAuth2Exception ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         CoreProduct coreProduct = requireNonNull(coreProductResponseEntity.getBody());
 
-        ResponseEntity<Category> categoryResponseEntity;
-        try {
+        ResponseEntity<Category> categoryResponseEntity = getCategory(coreProduct.getCategoryID(), auth);
+        /*try {
             categoryResponseEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + coreProduct.getCategoryID(),
                     HttpMethod.GET, buildHttpEntity(), Category.class);
         } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
+        }*/
+        HttpStatus categoryStatus = categoryResponseEntity.getStatusCode();
+        if(!wasCallSuccessful(categoryResponseEntity) && categoryStatus != HttpStatus.NOT_FOUND){
+            if(categoryStatus == HttpStatus.FORBIDDEN){
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            } else {
+                throw new RuntimeException();
+            }
         }
         Category category = requireNonNull(categoryResponseEntity.getBody());
         Product product = new Product(coreProduct.getId(), coreProduct.getName(), coreProduct.getPrice(), category,
@@ -241,13 +283,17 @@ public class InventoryController {
     }
 
     @SuppressWarnings("unused")
-    public ResponseEntity<Product> deleteProductCache(@PathVariable(value = "id") Integer productId) {
+    public ResponseEntity<Product> deleteProductCache(@PathVariable(value = "id") Integer productId, OAuth2Authentication auth) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
     }
 
-    private ResponseEntity<Category> getOrCreateCategory(String categoryName) {
+    private ResponseEntity<Category> getOrCreateCategory(String categoryName, OAuth2Authentication auth) {
         ResponseEntity<List<Category>> categoriesEntity;
-        categoriesEntity = getCategories();
+        try {
+            categoriesEntity = getCategories(auth);
+        } catch (OAuth2Exception ex){
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
 
         List<Category> categories = requireNonNull(categoriesEntity.getBody());
 
@@ -256,24 +302,27 @@ public class InventoryController {
                 .findFirst();
 
         return categoryOptional.map(ResponseEntity::ok)
-                .orElseGet(() -> createCategory(new CategoryDTO(categoryName)));
+                .orElseGet(() -> createCategory(new CategoryDTO(categoryName), auth));
     }
 
     @HystrixCommand(fallbackMethod = "createCategoryCache", commandProperties = {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
     })
     @PostMapping("/categories")
-    public ResponseEntity<Category> createCategory(@RequestBody @Valid CategoryDTO categoryDTO) {
+    @RolesAllowed({"ADMIN"})
+    public ResponseEntity<Category> createCategory(@RequestBody @Valid CategoryDTO categoryDTO, OAuth2Authentication auth) {
         try {
-            return restTemplate.exchange(CATEGORY_SERVICE_URL, HttpMethod.POST, buildHttpEntity(categoryDTO),
+            return restTemplate.exchange(CATEGORY_SERVICE_URL, HttpMethod.POST, buildHttpEntity(auth, categoryDTO),
                     Category.class);
         } catch (HttpClientErrorException.BadRequest ex) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        } catch (OAuth2Exception ex){
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
     }
 
     @SuppressWarnings("unused")
-    public ResponseEntity<Category> createCategoryCache(@RequestBody @Valid CategoryDTO categoryDTO) {
+    public ResponseEntity<Category> createCategoryCache(@RequestBody @Valid CategoryDTO categoryDTO, OAuth2Authentication auth) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
     }
 
@@ -281,21 +330,26 @@ public class InventoryController {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
     })
     @GetMapping("/categories")
-    public ResponseEntity<List<Category>> getCategories() {
-        System.out.println("[InventoryService#getCategories] Get categories.");
+    @RolesAllowed({"USER"})
+    public ResponseEntity<List<Category>> getCategories(OAuth2Authentication auth) {
+        LOGGER.info("[InventoryService#getCategories] Get categories.");
         ResponseEntity<Category[]> categoriesEntity;
-        categoriesEntity = restTemplate.exchange(CATEGORY_SERVICE_URL, HttpMethod.GET, buildHttpEntity(),
-                Category[].class);
+        try {
+            categoriesEntity = restTemplate.exchange(CATEGORY_SERVICE_URL, HttpMethod.GET, buildHttpEntity(auth),
+                    Category[].class);
+        } catch (OAuth2Exception ex){
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         List<Category> categories = List.of(requireNonNull(categoriesEntity.getBody()));
-        System.out.println("[InventoryService#getCategories] Found " + categories.size() + " categories.");
+        LOGGER.info("[InventoryService#getCategories] Found " + categories.size() + " categories.");
         categoryCache.clear();
         categories.forEach(category -> categoryCache.put(category.getId(), category));
         return ResponseEntity.ok(categories);
     }
 
     @SuppressWarnings("unused")
-    public ResponseEntity<List<Category>> getCategoriesCache() {
-        System.out.println("[InventoryService#getCategoriesCache] Get cached categories.");
+    public ResponseEntity<List<Category>> getCategoriesCache(OAuth2Authentication auth) {
+        LOGGER.info("[InventoryService#getCategoriesCache] Get cached categories.");
         return ResponseEntity.ok(List.copyOf(categoryCache.values()));
     }
 
@@ -303,13 +357,16 @@ public class InventoryController {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
     })
     @GetMapping("categories/{id}")
-    public ResponseEntity<Category> getCategory(@PathVariable(value = "id") Long categoryId){
+    @RolesAllowed({"USER"})
+    public ResponseEntity<Category> getCategory(@PathVariable(value = "id") Integer categoryId, OAuth2Authentication auth){
         ResponseEntity<Category> categoryEntity;
         try {
             categoryEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + categoryId,
-                    HttpMethod.GET, buildHttpEntity(), Category.class);
+                    HttpMethod.GET, buildHttpEntity(auth), Category.class);
         } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
+        } catch (OAuth2Exception ex){
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
         Category category = requireNonNull(categoryEntity.getBody());
@@ -318,7 +375,7 @@ public class InventoryController {
     }
 
     @SuppressWarnings("unused")
-    public ResponseEntity<Category> getCategoryCache(@PathVariable(value = "id") Long categoryId){
+    public ResponseEntity<Category> getCategoryCache(@PathVariable(value = "id") Long categoryId, OAuth2Authentication auth){
         Category category = categoryCache.get(categoryId);
         if (category == null) {
             return ResponseEntity.notFound().build();
@@ -330,11 +387,17 @@ public class InventoryController {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
     })
     @PutMapping("/categories/{id}")
+    @RolesAllowed({"ADMIN"})
     public ResponseEntity<Category> updateCategory(@PathVariable(value = "id") Long categoryId,
-                                                   @RequestBody @Valid Category categoryToUpdate) {
+                                                   @RequestBody @Valid Category categoryToUpdate,
+                                                   OAuth2Authentication auth) {
         ResponseEntity<Category> categoryResponseEntity;
-        categoryResponseEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + categoryId,
-                HttpMethod.PUT, buildHttpEntity(categoryToUpdate), Category.class);
+        try {
+            categoryResponseEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + categoryId,
+                    HttpMethod.PUT, buildHttpEntity(auth, categoryToUpdate), Category.class);
+        } catch (OAuth2Exception ex){
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         Category category = requireNonNull(categoryResponseEntity.getBody());
         categoryCache.put(category.getId(), category);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(category);
@@ -342,7 +405,8 @@ public class InventoryController {
 
     @SuppressWarnings("unused")
     public ResponseEntity<Category> updateCategoryCache(@PathVariable(value = "id") Long categoryId,
-                                                        @RequestBody @Valid Category categoryToUpdate) {
+                                                        @RequestBody @Valid Category categoryToUpdate,
+                                                        OAuth2Authentication auth) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
     }
 
@@ -350,31 +414,38 @@ public class InventoryController {
             @HystrixProperty(name = "circuitBreaker.requestVolumeThreshold", value = "2")
     })
     @DeleteMapping("/categories/{id}")
-    public ResponseEntity<Category> deleteCategory(@PathVariable(value = "id") Long categoryId) {
+    @RolesAllowed({"ADMIN"})
+    public ResponseEntity<Category> deleteCategory(@PathVariable(value = "id") Long categoryId, OAuth2Authentication auth) {
         ResponseEntity<Category> categoryResponseEntity;
         try {
             categoryResponseEntity = restTemplate.exchange(CATEGORY_SERVICE_URL + "/" + categoryId,
-                    HttpMethod.DELETE, buildHttpEntity(), Category.class);
+                    HttpMethod.DELETE, buildHttpEntity(auth), Category.class);
         } catch (HttpClientErrorException.NotFound ex) {
             return ResponseEntity.notFound().build();
+        } catch (OAuth2Exception ex){
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         Category category = requireNonNull(categoryResponseEntity.getBody());
 
         ResponseEntity<CoreProduct[]> coreProductsResponseEntity;
 
-        coreProductsResponseEntity = restTemplate.exchange(PRODUCT_SERVICE_URL, HttpMethod.GET, buildHttpEntity(),
-                CoreProduct[].class);
+        try {
+            coreProductsResponseEntity = restTemplate.exchange(PRODUCT_SERVICE_URL, HttpMethod.GET, buildHttpEntity(auth),
+                    CoreProduct[].class);
+        } catch (OAuth2Exception ex){
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
 
         List<CoreProduct> coreProducts = Arrays.stream(requireNonNull(coreProductsResponseEntity.getBody()))
                 .filter(product -> product.getCategoryID() == category.getId())
                 .collect(Collectors.toList());
         //Delete all associated products
-        coreProducts.forEach(coreProduct -> deleteProduct(coreProduct.getCategoryID()));
+        coreProducts.forEach(coreProduct -> deleteProduct(coreProduct.getCategoryID(), auth));
         return ResponseEntity.accepted().body(category);
     }
 
     @SuppressWarnings("unused")
-    public ResponseEntity<Category> deleteCategoryCache(@PathVariable(value = "id") Long categoryId) {
+    public ResponseEntity<Category> deleteCategoryCache(@PathVariable(value = "id") Long categoryId, OAuth2Authentication auth) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
     }
 
@@ -384,7 +455,7 @@ public class InventoryController {
         return status >= 200 && status < 300;
     }
 
-    /*private HttpEntity buildHttpEntity(OAuth2Authentication auth) {
+    private HttpEntity buildHttpEntity(OAuth2Authentication auth) {
         return buildHttpEntity(auth, null);
     }
 
@@ -394,17 +465,17 @@ public class InventoryController {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(details.getTokenValue());
         return new HttpEntity<>(body, headers);
-    }*/
+    }
 
-    private <T> HttpEntity<T> buildHttpEntity(@Nullable T body) {
+    /*private <T> HttpEntity<T> buildHttpEntity(@Nullable T body) {
         HttpHeaders headers = new HttpHeaders();
-        System.out.println("HTTP body should be " + body);
+        LOGGER.info("HTTP body should be " + body);
         return new HttpEntity<>(body, headers);
     }
 
     private <T> HttpEntity<T> buildHttpEntity() {
         HttpHeaders headers = new HttpHeaders();
         return new HttpEntity<>(null, headers);
-    }
+    }*/
 
 }
