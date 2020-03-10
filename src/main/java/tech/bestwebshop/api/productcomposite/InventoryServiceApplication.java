@@ -44,7 +44,8 @@ public class InventoryServiceApplication {
         public void configure(HttpSecurity httpSecurity) throws Exception {
             httpSecurity
                     .authorizeRequests()
-                    /**/.anyRequest()
+                    .antMatchers("/**")
+                    ///**/.anyRequest()
                     .authenticated()
                     .and()
                     /**/.exceptionHandling()

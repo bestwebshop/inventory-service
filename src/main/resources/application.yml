@@ -24,10 +24,10 @@ security:
     client:
       client-id: webshop-webclient
       client-secret: supersecretpassword
-      access-token-uri: http://authorization-service:8080/oauth/token
+      access-token-uri: http://localhost:9208/oauth/token
       grant-type: authorization_code
-      user-authorization-uri: http://authorization-service:8080/oauth/authorize
+      user-authorization-uri: http://localhost:9208/oauth/authorize
       scope: all.read all.write
     resource:
       jwk:
-        key-set-uri: http://authorization-service:8080/oauth2/keys
+        key-set-uri: http://localhost:9208/oauth2/jwks.json
