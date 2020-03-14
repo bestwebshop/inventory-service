@@ -24,10 +24,18 @@ security:
     client:
       client-id: webshop-webclient
       client-secret: supersecretpassword
-      access-token-uri: http://localhost:9208/oauth/token
+      access-token-uri: http://docker.for.win.localhost:9208/oauth/token
       grant-type: authorization_code
-      user-authorization-uri: http://localhost:9208/oauth/authorize
+      user-authorization-uri: http://docker.for.win.localhost:9208/oauth/authorize
       scope: all.read all.write
     resource:
+      filter-order: 3
       jwk:
-        key-set-uri: http://localhost:9208/oauth2/jwks.json
+        key-set-uri: http://docker.for.win.localhost:9208/oauth2/jwks.json
+
+logging:
+  level:
+    root: WARN
+    org.springframework.web: INFO
+    org.springframework.security: DEBUG
+    org.springframework.security.oauth2: DEBUG
